@@ -11,7 +11,7 @@ mdriver
 *.elf
 
 # Linker output
-*.ilk
+*.ilk lk
 *.map
 *.exp
 
