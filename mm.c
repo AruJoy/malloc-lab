@@ -48,13 +48,11 @@ team_t team = {
 };
 
 /* single word (4) or double word (8) alignment */
-#define ALIGNMENT 8
+#define ALIGNMENT 8 // 명시적 가용 구현때, prev / next 기입하기 위해 단위 변경
 
 /* rounds up to the nearest multiple of ALIGNMENT */
-#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
-
-
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)   //ALIGN block size = heaeder+footer(= ALIGNMENT) + data_block_size
+#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))             
 
 static void *extend_heap(size_t words);
 static void *coalesce(void *bp);
@@ -71,27 +69,34 @@ int mm_init(void)
 {
     if((heap_listp = mem_sbrk(4*WSIZE)) == (void *) -1) return -1;
     PUT(heap_listp, 0);
-    PUT(heap_listp + (1*WSIZE), PACK(DSiZE, 1));
-    PUT(heap_listp + (2*WSIZE), PACK(DSiZE, 1));
-    PUT(heap_listp + (3*WSIZE), PACK(0, 1));
-    heap_listp += (2*WSIZE);
+    PUT(heap_listp + (1*WSIZE), PACK(DSiZE, 1));    //prologue_header = doubleword/1
+    PUT(heap_listp + (2*WSIZE), PACK(DSiZE, 1));    //prologue_footer = doubleword/1
+    PUT(heap_listp + (3*WSIZE), PACK(0, 1));        //epliogue = 0/1
+    heap_listp += (2*WSIZE);                        //prologue의 가상 payload 주소
 
-    if(extend_heap(CHUNKSIZE / WSIZE) == NULL) return -1;
+    if(extend_heap(CHUNKSIZE / WSIZE) == NULL) return -1;   // CHUNKSIZE / WSIZE = chunk:페이지 크기
+                                                            // 몇개의 word를 확장할지 결정
     return 0;
 }
 
 static void *extend_heap(size_t words){
-    char *bp;
-    size_t size;
-    size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
+    char *bp;                                                   // 1byte단위 자료형
+    size_t size;                                                // 부호없는 int 자료형
+    size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;     // -> 짝수단위로 올림처리해서 확장
 
-    if((long)(bp = mem_sbrk(size)) == -1) return NULL;
+    if((long)(bp = mem_sbrk(size)) == -1) return NULL;          // haep을 실질적으로 확장후 기존의 bp반남
 
-    PUT(HDRP(bp), PACK(size, 0));
+    PUT(HDRP(bp), PACK(size, 0));                               // 확장한 전체 block 은 한덩어리의 block으로 처리
     PUT(FTRP(bp), PACK(size, 0));
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
 
-    return coalesce(bp);
+    if(!GET_ALLOC(HDRP(PREV_BLKP(bp)))){  // 이전 블록이 할당되어 있지 않으면 병합
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+    return bp;                                        // 병합
 }
 
 /* 
